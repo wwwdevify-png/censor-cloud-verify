@@ -187,18 +187,27 @@ export class CloudReporter {
 		result?: Record<string, unknown>,
 		error?: { stage?: string; message: string },
 	): Promise<void> {
-		await this.patch({
+		if (!this.active) return;
+		const payload: Record<string, unknown> = {
 			status,
 			progress: {
 				stage: status,
 				message: status === "completed" ? "Task finished" : status === "cancelled" ? "Cancelled" : "Task failed",
-				percent: status === "completed" ? 100 : undefined,
+				...(status === "completed" ? { percent: 100 } : {}),
 			},
 			...(result ? { result } : {}),
 			...(error
 				? { error: { stage: error.stage ?? "runner", message: scrubSensitive(error.message).slice(0, 4000) } }
 				: {}),
-		});
+		};
+		// Terminal status is the one report that must not be lost: retry the
+		// whole patch a few times (each send already retries transient errors)
+		// before giving up and falling back to the GitHub issue record.
+		for (let attempt = 1; attempt <= 4; attempt++) {
+			const cp = await this.patch(payload);
+			if (cp.status === status || cp.cancelled) return;
+			if (attempt < 4) await this.sleep(1000 * attempt);
+		}
 		await this.flush();
 	}
 }
