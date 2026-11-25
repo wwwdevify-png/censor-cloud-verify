@@ -403,6 +403,10 @@ async function main(): Promise<number> {
 
 	console.log(`[censor] claiming issue #${issueNumber}`);
 	await claimIssue();
+	// Claim in Firestore too: the proxy only accepts running→completed/failed,
+	// so without this the task would stay `queued` despite finishing.
+	const claim = await reporter.patch({ status: "running" });
+	if (await abortIfCancelled(claim)) return 0;
 	let cp = await reporter.stage("claimed", `Runner picked up issue #${issueNumber}`, 5);
 	if (await abortIfCancelled(cp)) return 0;
 
@@ -488,6 +492,7 @@ async function main(): Promise<number> {
 	let failureSummary = "";
 
 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+		agentAttempts = attempt;
 		const repairPrompt = attempt === 1
 			? spec.prompt
 			: `${spec.prompt}\n\n--- CI FAILURE — FIX THIS ---\nThe previous attempt's GitHub Actions checks failed. Analyze the failure below, fix the code, and keep the changes minimal. Do not change the tests to make them pass unless they are wrong.\n\n${failedLogs.join("\n\n").slice(-20_000)}`;
