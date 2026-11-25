@@ -1,0 +1,117 @@
+name: Censor Cloud Agent
+
+# Picks up queued Censor tasks (issues labeled `censor-task` + `censor:queued`)
+# and executes them. Cron runs every 15 minutes; manual dispatch is supported.
+# One task per run — the cron simply picks up the next 15 minutes later.
+#
+# PER-USER INSTALLATION: this file is copied into each connected user's OWN
+# runner repo by Settings → GitHub Cloud → Connect. They pay their own Actions
+# minutes, and the queue issues are created in their repo by the Firebase
+# proxy using their own GitHub PAT. The runner reports progress/results to
+# `ghRunnerUpdate` on the Censor Firebase project (per-user runner key).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Issue number to execute (default: first queued task)"
+        required: false
+        type: string
+
+concurrency:
+  group: censor-agent
+  cancel-in-progress: false
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350 # hard 6h cap on a single task
+    permissions:
+      issues: write
+      contents: read
+    env:
+      # Clone URL of the Censor monorepo (the agent). Set under Settings →
+      # Secrets and variables → Actions → Variables. For private Censor repos,
+      # also set secret CENSOR_MONO_TOKEN (PAT with read access) and use it in
+      # the clone step via git-extraHeader.
+      CENSOR_REPOSITORY: ${{ vars.CENSOR_REPOSITORY }}
+      CENSOR_REF: ${{ vars.CENSOR_REF || 'main' }}
+      CENSOR_PROVIDER: ${{ vars.CENSOR_PROVIDER || 'cline' }}
+    steps:
+      - name: Checkout runner repo
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Ensure labels exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          gh label create "censor-task"   --color 1d76db --description "Marks a Censor Cloud task"      --repo "$repo" --force
+          gh label create "censor:queued" --color 0e8a16 --description "Task waiting for a runner slot" --repo "$repo" --force
+          gh label create "censor:running" --color fbca04 --description "Task currently executing"       --repo "$repo" --force
+          gh label create "censor:done"   --color 5319e7 --description "Task completed; branch pushed"  --repo "$repo" --force
+          gh label create "censor:failed" --color b60205 --description "Task failed; see comments"      --repo "$repo" --force
+          gh label create "censor:waiting" --color d876e3 --description "Waiting for user approval"      --repo "$repo" --force
+          gh label create "censor:cancelled" --color 795548 --description "Task cancelled by the user"   --repo "$repo" --force
+
+      - name: Pick queued task
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.issue }}" ]; then
+            echo "issue=${{ inputs.issue }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          issue=$(gh issue list --repo "$GITHUB_REPOSITORY" \
+            --label "censor-task" --label "censor:queued" --state open \
+            --json number --jq '.[0].number // empty')
+          echo "issue=${issue}" >> "$GITHUB_OUTPUT"
+
+      - name: Execute task
+        if: steps.pick.outputs.issue != ''
+        env:
+          # Token to clone/push the TARGET repo. Falls back to GITHUB_TOKEN when
+          # the target repo is the same repo or a fork of it. For private target
+          # repos you MUST set secret CENSOR_TARGET_TOKEN (PAT, repo scope).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_TOKEN: ${{ secrets.CENSOR_TARGET_TOKEN }}
+          # Clone access to the private Censor monorepo (Settings → Secrets:
+          # CENSOR_MONO_TOKEN — the same PAT also works here, needs read access).
+          CENSOR_MONO_TOKEN: ${{ secrets.CENSOR_MONO_TOKEN }}
+          # Provider auth. Option A (zero extra keys): CENSOR_OAUTH_JSON_B64 =
+          # base64 of the CLI's providers.json (~/.cline/data/settings/providers.json)
+          # → the agent uses your signed-in Censor subscription.
+          # Option B (static key): set the key for CENSOR_PROVIDER below.
+          CENSOR_OAUTH_JSON_B64: ${{ secrets.CENSOR_OAUTH_JSON_B64 }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CENSOR_API_KEY: ${{ secrets.CENSOR_API_KEY }}
+          # Optional model override
+          CENSOR_MODEL: ${{ vars.CENSOR_MODEL }}
+          # Firebase proxy: full URL of the ghRunnerUpdate endpoint + the
+          # per-user runner key (set by the desktop Connect flow as a repo
+          # secret). Reporting is best-effort when either is missing.
+          CENSOR_CLOUD_PROXY_URL: ${{ vars.CENSOR_CLOUD_PROXY_URL || 'https://us-central1-censor-ide.cloudfunctions.net/ghRunnerUpdate' }}
+          CENSOR_RUNNER_KEY: ${{ secrets.CENSOR_RUNNER_KEY }}
+          # Agent source: "source" clones CENSOR_REPOSITORY with CENSOR_MONO_TOKEN;
+          # "npm" uses the published CLI (CENSOR_AGENT_BIN). Per-user repos
+          # cannot clone a private Censor monorepo, so "npm" is recommended
+          # once @censor/cli is published; "source" works with the owner's PAT.
+          CENSOR_AGENT_MODE: ${{ vars.CENSOR_AGENT_MODE || 'source' }}
+          CENSOR_AGENT_BIN: ${{ vars.CENSOR_AGENT_BIN || 'censor' }}
+        run: bun run runner/run-task.ts --issue "${{ steps.pick.outputs.issue }}"
+
+      - name: Report empty queue
+        if: steps.pick.outputs.issue == ''
+        run: echo "No queued censor-task issues — nothing to do."
