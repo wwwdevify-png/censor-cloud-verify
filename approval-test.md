@@ -1,1 +1,1 @@
-approved by Censor Cloud
+approved by Censor Cloud.

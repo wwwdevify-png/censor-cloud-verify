@@ -1,0 +1,28 @@
+{
+  "source": "censor-account",
+  "version": "org-01M7QWA3JMR7MAGA209HWYQHTA",
+  "remoteConfig": {
+    "version": "v1",
+    "providerSettings": {},
+    "telemetryEnabled": true,
+    "kanbanEnabled": false,
+    "mcpMarketplaceEnabled": true,
+    "yoloModeAllowed": true,
+    "openTelemetryEnabled": false,
+    "openTelemetryOtlpInsecure": false,
+    "enterpriseTelemetry": {
+      "promptUploading": {}
+    }
+  },
+  "metadata": {
+    "paths": {
+      "pluginName": "enterprise",
+      "pluginPath": "/home/runner/work/_temp/target/.cline/enterprise",
+      "workflowsPath": "/home/runner/work/_temp/target/.cline/enterprise/workflows",
+      "skillsPath": "/home/runner/work/_temp/target/.cline/enterprise/skills",
+      "bundleCachePath": "/home/runner/work/_temp/target/.cline/enterprise/cache/bundle.json",
+      "manifestPath": "/home/runner/work/_temp/target/.cline/enterprise/managed.json",
+      "rulesFilePath": "/home/runner/work/_temp/target/.cline/enterprise/rules.md"
+    }
+  }
+}
