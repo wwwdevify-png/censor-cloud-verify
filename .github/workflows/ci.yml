@@ -1,0 +1,15 @@
+name: CI
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify cloud agent artifact
+        run: |
+          test -f cloud-agent-verification.md
+          grep -qi "censor cloud" cloud-agent-verification.md
+          echo "Cloud verification file OK"
