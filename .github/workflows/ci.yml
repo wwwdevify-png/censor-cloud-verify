@@ -8,8 +8,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify cloud agent artifact
+      - name: Verify cloud agent README section
         run: |
-          test -f cloud-agent-verification.md
-          grep -qi "censor cloud" cloud-agent-verification.md
-          echo "Cloud verification file OK"
+          grep -q '^## Cloud verification' README.md
+          grep -qi 'Censor Cloud agent' README.md
+          echo "Cloud verification README section OK"
