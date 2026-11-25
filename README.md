@@ -1,2 +1,3 @@
-# censor-cloud-verify
-Isolated Censor Cloud agent verification target
+# Censor Cloud verification target
+
+Isolated repository used by automated Censor Cloud agent tests.
