@@ -103,7 +103,10 @@ async function run(
 	onLine?: (line: string) => void,
 ): Promise<{ code: number | null; output: string }> {
 	return new Promise((resolvePromise, rejectPromise) => {
-		const child = spawn(cmd, cmdArgs, {
+		// spawn() rejects arguments containing NUL bytes; CI log snippets can
+		// contain binary ZIP data, so strip them defensively.
+		const safeArgs = cmdArgs.map((value) => String(value).replace(/\0/g, ""));
+		const child = spawn(cmd, safeArgs, {
 			cwd,
 			env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...extraEnv },
 			stdio: ["ignore", "pipe", "pipe"],
@@ -299,6 +302,14 @@ interface CheckResult {
  * never deploy/release/publish), then poll their runs and collect job/log
  * details for failed checks.
  */
+/** GitHub's /runs/{id}/logs endpoint returns a ZIP archive, not plain text.
+ *  Never inject binary data into a repair prompt (spawn rejects NUL bytes). */
+function plainLogTail(raw: string | undefined): string | undefined {
+	if (!raw || raw.startsWith("PK\u0003\u0004")) return undefined;
+	const text = raw.replace(/[^\t\n\r\x20-\x7E]/g, "").trim();
+	return text ? text.slice(-6000) : undefined;
+}
+
 async function collectChecks(
 	spec: TaskSpec,
 	branch: string,
@@ -363,12 +374,12 @@ async function collectChecks(
 		const failedSteps = jobs.flatMap((job) =>
 			(job.steps ?? []).filter((s) => s.conclusion === "failure").map((s) => `${job.name}: ${s.name}`),
 		);
-		const logs = await gh.runLogs(spec.repo, r.id).catch(() => undefined);
+		const logs = plainLogTail(await gh.runLogs(spec.repo, r.id).catch(() => undefined));
 		failedLogs.push(
 			[
 				`Workflow: ${r.name} (${r.conclusion}) — ${r.html_url}`,
 				...failedSteps.slice(0, 20),
-				...(logs ? [`Log tail:\n${scrubSensitive(logs).slice(-6000)}`] : []),
+				...(logs ? [`Log tail:\n${scrubSensitive(logs)}`] : []),
 			].join("\n"),
 		);
 	}
